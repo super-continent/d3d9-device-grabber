@@ -91,6 +91,69 @@ pub unsafe fn get_d3d9_device() -> Result<&'static mut IDirect3DDevice9, Box<dyn
     }
 }
 
+pub unsafe fn get_d3d9_device_with_hwnd() -> Result<(&'static mut IDirect3DDevice9, HWND), Box<dyn error::Error>> {
+    let window = match get_process_window() {
+        Some(hwnd) => hwnd,
+        None => return Err(Box::new(D3D9GrabError::GetProcessWindowFailed)),
+    };
+
+    let d3d9 = Direct3DCreate9(D3D_SDK_VERSION);
+
+    if d3d9.is_null() {
+        return Err(Box::new(D3D9GrabError::D3DCreate9Null));
+    }
+
+    let mut present_params = D3DPRESENT_PARAMETERS {
+        BackBufferWidth: 0,
+        BackBufferHeight: 0,
+        BackBufferFormat: 0,
+        BackBufferCount: 0,
+        MultiSampleType: 0,
+        MultiSampleQuality: 0,
+        SwapEffect: D3DSWAPEFFECT_DISCARD,
+        hDeviceWindow: window,
+        Windowed: FALSE,
+        EnableAutoDepthStencil: 0,
+        AutoDepthStencilFormat: 0,
+        Flags: 0,
+        FullScreen_RefreshRateInHz: 0,
+        PresentationInterval: 0,
+    };
+
+    let d3d9_device: *mut IDirect3DDevice9 = ptr::null_mut();
+
+    let result_device_err = (*d3d9).CreateDevice(
+        D3DADAPTER_DEFAULT,
+        D3DDEVTYPE_HAL,
+        present_params.hDeviceWindow,
+        D3DCREATE_SOFTWARE_VERTEXPROCESSING,
+        &mut present_params,
+        mem::transmute(&d3d9_device),
+    );
+
+    if result_device_err != 0 {
+        present_params.Windowed = !present_params.Windowed;
+        let result_device_err = (*d3d9).CreateDevice(
+            D3DADAPTER_DEFAULT,
+            D3DDEVTYPE_HAL,
+            present_params.hDeviceWindow,
+            D3DCREATE_SOFTWARE_VERTEXPROCESSING,
+            mem::transmute(&present_params),
+            mem::transmute(&d3d9_device),
+        );
+        if result_device_err != 0 {
+            return Err(Box::new(D3D9GrabError::CreateDeviceError(
+                result_device_err,
+            )));
+        }
+    }
+
+    match d3d9_device.as_mut() {
+        None => return Err(Box::new(D3D9GrabError::AsMutError)),
+        Some(device_ref) => return Ok((device_ref, window)),
+    }
+}
+
 unsafe fn get_process_window() -> Option<HWND> {
     extern "system" fn enum_windows_callback(hwnd: HWND, l_param: LPARAM) -> BOOL {
         let mut wnd_proc_id: DWORD = 0;
